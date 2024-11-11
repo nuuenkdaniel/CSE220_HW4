@@ -53,6 +53,39 @@ void await_conn(int *listen_fd, int *conn_fd, struct sockaddr_in *address, int *
   }
 }
 
+// Rotates the given shape by the give number of times clockwise
+int *rotate_shape(int *shape, int r, int c, int rotations){ 
+  int temp_shape[16] = {0};
+  memcpy(temp_shape, shape, r*c*sizeof(int));
+  int *new_shape = calloc(r*c, sizeof(r*c));
+  int temp;
+  int curr_left;
+  int curr_right;
+  for(int i = 0; i < rotations; i++) {
+    // Transposing the matrix
+    for(int j = 0; j < r; j++) {
+      for(int k = 0; k < c; k++) {
+        temp = temp_shape[j*c+k];
+        temp_shape[j*c+k] = temp_shape[k*c+j];
+        temp_shape[k*c+j] = temp;
+      }
+    }
+    for(int j = 0; j < r; j++) {
+      curr_left = 0;
+      curr_right = c-1;
+      while(curr_left < curr_right) {
+        temp = temp_shape[j*c+curr_left];
+        temp_shape[j*c+curr_left] = temp_shape[j*c+curr_right];
+        temp_shape[j*c+curr_right] = temp;
+      }
+    }
+  }
+  memcpy(new_shape, temp_shape, r*c*sizeof(int));
+  return new_shape;
+}
+
+void handle_request(){};
+
 int main() {
   int listen_fd1, listen_fd2;
   int conn_fd1, conn_fd2;
@@ -69,9 +102,17 @@ int main() {
   // Accept Connections
   await_conn(&listen_fd1, &conn_fd1, &address1, &addrlen);
   await_conn(&listen_fd2, &conn_fd2, &address2, &addrlen);
+  
+  // Creating the shapes
+  int shape1[2][2] = { 1,1,1,1 };
+  int shape2[4][1] = { 1,1,1,1 };
+  int shape3[2][3] = { 0,1,1,1,1,0 };
+  int shape4[3][2] = { 1,0,1,0,1,1 };
+  int shape5[2][3] = { 1,1,0,0,1,1 };
+  int shape6[3][2] = { 0,1,0,1,1,1 };
+  int shape7[2][3] = { 1,1,1,0,1,0 };
 
   int nbytes;
-
   while(1) {
     memset(buffer, 0, BUFFER_SIZE);
     nbytes = read(conn_fd1, buffer, BUFFER_SIZE);
@@ -80,6 +121,9 @@ int main() {
       exit(EXIT_FAILURE);
     }
     printf("Data recieved from client1: %s\n", buffer);
+    memset(buffer, 1, BUFFER_SIZE);
+    buffer[strlen(buffer)-1] = '\0';
+    send(conn_fd1, "Hello", strlen("Hello"), 0);
 
     memset(buffer, 0, BUFFER_SIZE);
     nbytes = read(conn_fd1, buffer, BUFFER_SIZE);
