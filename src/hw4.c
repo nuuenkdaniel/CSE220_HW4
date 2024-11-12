@@ -53,32 +53,51 @@ void await_conn(int *listen_fd, int *conn_fd, struct sockaddr_in *address, int *
   }
 }
 
+void copy_shape(int *src_shape, int *dest_shape, int r, int c_src, int c_dest) {
+  for(int i = 0; i < r; i++) {
+    for(int j = 0; j < c_src; j++) {
+      if(src_shape[i*c_src+j] == 1) dest_shape[i*c_dest+j] = 1;
+    }
+  }
+}
+
 // Rotates the given shape by the give number of times clockwise
 int *rotate_shape(int *shape, int r, int c, int rotations){ 
-  int temp_shape[6] = {0};
-  memcpy(temp_shape, shape, r*c*sizeof(int));
+  int temp_shape[16] = {0};
+  copy_shape(shape, (int*)temp_shape, r, c, 4);
   int *new_shape = calloc(r*c, sizeof(r*c));
   int temp;
   int curr_left;
   int curr_right;
 
-  for(int i = 0; i < 2; i++) {
-    for(int j = 0; j < 3; j++) {
+  printf("Initial Shape\n");
+  for(int i = 0; i < 4; i++) {
+    for(int j = 0; j < 4; j++) {
       printf("%d ", temp_shape[i*4+j]);
     }
     printf("\n");
   }
-
+  printf("\n");
 
   for(int i = 0; i < rotations; i++) {
     // Transposing the matrix
     for(int j = 0; j < r; j++) {
-      for(int k = 0; k < c; k++) {
-        temp = temp_shape[j*c+k];
-        temp_shape[j*c+k] = temp_shape[k*c+j];
-        temp_shape[k*c+j] = temp;
+      for(int k = j+1; k < c; k++) {
+        temp = temp_shape[j*4+k];
+        temp_shape[j*4+k] = temp_shape[k*4+j];
+        temp_shape[k*4+j] = temp;
       }
     }
+    printf("Shape after transpose\n");
+    for(int j = 0; j < 4; j++) {
+      for(int k = 0; k < 4; k++) {
+        printf("%d ", temp_shape[j*4+k]);
+      }
+      printf("\n");
+    }
+    printf("\n");
+
+    // Swap row and column indexes
     temp = r;
     r = c;
     c = temp;
@@ -87,15 +106,25 @@ int *rotate_shape(int *shape, int r, int c, int rotations){
       curr_left = 0;
       curr_right = c-1;
       while(curr_left < curr_right) {
-        temp = temp_shape[j*c+curr_left];
-        temp_shape[j*c+curr_left] = temp_shape[j*c+curr_right];
-        temp_shape[j*c+curr_right] = temp;
+        temp = temp_shape[j*4+curr_left];
+        temp_shape[j*4+curr_left] = temp_shape[j*4+curr_right];
+        temp_shape[j*4+curr_right] = temp;
         curr_left++;
         curr_right--;
       }
     }
+
+    printf("Shape after %d rotation\n", i+1);
+    for(int i = 0; i < 4; i++) {
+      for(int j = 0; j < 4; j++) {
+        printf("%d ", temp_shape[i*4+j]);
+      }
+      printf("\n");
+    }
+    printf("\n");
+
   }
-  memcpy(new_shape, temp_shape, r*c*sizeof(int));
+  copy_shape((int*)temp_shape, new_shape, r, 4, c);
   return new_shape;
 }
 
@@ -108,7 +137,7 @@ int main() {
   int opt = 1;
   int addrlen = sizeof(address1);
   char buffer[BUFFER_SIZE] = {0};
-  
+
   // Socket setup
   socket_setup(&listen_fd1, &address1, &opt, &addrlen, 0);
   socket_setup(&listen_fd2, &address2, &opt, &addrlen, 1);
@@ -117,7 +146,7 @@ int main() {
   // Accept Connections
   await_conn(&listen_fd1, &conn_fd1, &address1, &addrlen);
   await_conn(&listen_fd2, &conn_fd2, &address2, &addrlen);
-  
+
   // Creating the shapes
   int shape1[2][2] = { 1,1,1,1 };
   int shape2[4][1] = { 1,1,1,1 };
@@ -128,12 +157,14 @@ int main() {
   int shape7[2][3] = { 1,1,1,0,1,0 };
 
   printf("Got here\n");
-  int *test_shape = rotate_shape((int*)shape3, 2, 3, 1);
+  int *test_shape = rotate_shape((int*)shape3, 2, 3, 2);
 
-  for(int i = 0; i < 3; i++) {
-    for(int j = 0; j < 2; j++) {
-      printf("%d \n", test_shape[i*2+j]);
+  printf("\n");
+  for(int i = 0; i < 2; i++) {
+    for(int j = 0; j < 3; j++) {
+      printf("%d ", test_shape[i*3+j]);
     }
+    printf("\n");
   }
 
   printf("Got here 2\n");
