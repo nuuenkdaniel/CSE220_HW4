@@ -71,17 +71,6 @@ int *rotate_shape(int *shape, int r, int c, int rotations){
   int curr_right;
   int largest = (r > c)? r : c;
 
-  /*
-  printf("Initial Shape\n");
-  for(int i = 0; i < 4; i++) {
-    for(int j = 0; j < 4; j++) {
-      printf("%d ", temp_shape[i*4+j]);
-    }
-    printf("\n");
-  }
-  printf("\n");
-  */
-
   for(int i = 0; i < rotations; i++) {
     // Transposing the matrix
     for(int j = 0; j < largest; j++) {
@@ -91,14 +80,6 @@ int *rotate_shape(int *shape, int r, int c, int rotations){
         temp_shape[k*4+j] = temp;
       }
     }
-    printf("Shape after transpose\n");
-    for(int j = 0; j < 4; j++) {
-      for(int k = 0; k < 4; k++) {
-        printf("%d ", temp_shape[j*4+k]);
-      }
-      printf("\n");
-    }
-    printf("\n");
 
     // Swap row and column indexes
     temp = r;
@@ -116,15 +97,6 @@ int *rotate_shape(int *shape, int r, int c, int rotations){
         curr_right--;
       }
     }
-
-    printf("Shape after %d rotation\n", i+1);
-    for(int i = 0; i < 4; i++) {
-      for(int j = 0; j < 4; j++) {
-        printf("%d ", temp_shape[i*4+j]);
-      }
-      printf("\n");
-    }
-    printf("\n");
   }
 
   // Fix shape back to top left
@@ -136,14 +108,11 @@ int *rotate_shape(int *shape, int r, int c, int rotations){
     while(j < 4) {
       if(temp_shape[i*4+j]) break;
       j++;
-      printf("j: %d\n",j);
     }
     if(j < 4) break;
-    printf("HERE\n");
     temp++;
     i++;
   }
-  printf("Count: %d\n",temp);
 
   j = 0;
   int temp2 = 0;
@@ -152,34 +121,75 @@ int *rotate_shape(int *shape, int r, int c, int rotations){
     while(i < 4) {
       if(temp_shape[i*4+j]) break;
       i++;
-      printf("i: %d\n",j);
     }
     if(i < 4) break;
-    printf("HERE\n");
     temp2++;
     j++;
   }
-  printf("Count: %d\n",temp);
-  printf("Count2: %d\n",temp2);
+
   for(int i = temp; i < 4; i++) {
     for(int j = temp2; j < 4; j++) {
       temp_shape[(i-temp)*4+(j-temp2)] = temp_shape[i*4+j];
       if(temp != 0 || temp2 != 0) temp_shape[i*4+j] = 0;
     }
   }
-  printf("Shape after fix\n");
-  for(int i = 0; i < 4; i++) {
-    for(int j = 0; j < 4; j++) {
-      printf("%d ", temp_shape[i*4+j]);
-    }
-    printf("\n");
-  }
-  printf("\n");
   copy_shape((int*)temp_shape, new_shape, r, 4, c);
   return new_shape;
 }
 
-void handle_request(){};
+void read_fd(int conn_fd, char *buffer) {
+  memset(buffer, 0, BUFFER_SIZE);
+  int nbytes = read(conn_fd, buffer, BUFFER_SIZE);
+  if(nbytes <= 0) {
+    perror("Failed to read from client");
+    exit(EXIT_FAILURE);
+  }
+}
+
+void begin_game(int *board1, int *board2, int conn_fd1, int conn_fd2, char *buffer) {
+  int done = 0;
+  char extra[1024];
+  char packet_type;
+  while(!done) {
+    read_fd(conn_fd1, buffer);
+    int args[3];
+    if(sscanf(buffer, "%c %d %d %s", &packet_type, &args[0], &args[1], extra) == 3 && packet_type == 'B' && args[0] > 0 && args[1] > 0) {
+      done = 1; 
+      board1 = calloc(args[0]*args[1], sizeof(int));
+      board2 = calloc(args[0]*args[1], sizeof(int));
+      send(conn_fd1, "A", 1, 0);
+    }
+    else if(packet_type != 'B') send(conn_fd1, "100", 3, 0);
+    else send(conn_fd1, "200", 3, 0);
+  }
+  done = 0;
+  while(!done) {
+    read_fd(conn_fd2, buffer);
+    if(sscanf(buffer, "%c %s", &packet_type, extra) == 1 && packet_type == 'B') {
+      done = 1;
+      send(conn_fd2, "A", 1, 0);
+    }
+    else if(packet_type != 'B') send(conn_fd2, "100", 3, 0);
+    else send(conn_fd2, "200", 3, 0);
+  }
+}
+
+void initialize_game(int *board1, int conn_fd, char *buffer) {
+  int done = 0;
+  char packet_type;
+  char extra[1024];
+  while(!done) {
+    read_fd(conn_fd, buffer);
+    int args[5][4];
+    char *buffer_ptr = buffer;
+    if(sscanf(buffer_ptr, "%c", &packet_type) != 1 || packet_type != 'I') send(conn_fd, "101", 3, 0);
+    buffer_ptr = strchr(buffer_ptr, ' ');
+    int i = 0;
+    while(i < 5) {
+      if(sscanf(buffer_ptr, "%d %d %d %d", &args[i][0], &args[i][1], &args[i][2], &args[i][3]) != 4) send(conn_fd, "201", 3, 0);
+    }
+  }
+}
 
 int main() {
   int listen_fd1, listen_fd2;
@@ -207,47 +217,20 @@ int main() {
   int shape6[3][2] = { 0,1,0,1,1,1 };
   int shape7[2][3] = { 1,1,1,0,1,0 };
 
-  printf("Got here\n");
-  int *test_shape = rotate_shape((int*)shape5, 2, 3, 3);
+  int *board1, *board2 = NULL;
+  char player1_history[1024], board2_history[1024];
+  player1_history[0] = '\0';
+  board2_history[0] = '\0';
 
-  printf("\n");
-  for(int i = 0; i < 3; i++) {
-    for(int j = 0; j < 2; j++) {
-      printf("%d ", test_shape[i*2+j]);
-    }
-    printf("\n");
-  }
-
-  printf("Got here 2\n");
-
-  /*
-  int nbytes;
-  while(1) {
-    memset(buffer, 0, BUFFER_SIZE);
-    nbytes = read(conn_fd1, buffer, BUFFER_SIZE);
-    if(nbytes <= 0) {
-      perror("Failed to read from client");
-      exit(EXIT_FAILURE);
-    }
-    printf("Data recieved from client1: %s\n", buffer);
-    memset(buffer, 1, BUFFER_SIZE);
-    buffer[strlen(buffer)-1] = '\0';
-    send(conn_fd1, "Hello", strlen("Hello"), 0);
-
-    memset(buffer, 0, BUFFER_SIZE);
-    nbytes = read(conn_fd1, buffer, BUFFER_SIZE);
-    if(nbytes <= 0) {
-      perror("Failed to read from client");
-      exit(EXIT_FAILURE);
-    }
-    printf("Data recieved from client2: %s\n", buffer);
-  }
+  begin_game(board1, board2, conn_fd1, conn_fd2, buffer);
+  // initialize_game(board1, conn_fd1, buffer);
 
   printf("[Server] Shutting down.\n");
+  free(board1);
+  free(board2);
   close(conn_fd1);
   close(listen_fd1);
   close(conn_fd2);
   close(listen_fd2);
-  */
   return EXIT_SUCCESS;
 }
