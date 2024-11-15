@@ -16,6 +16,8 @@ typedef struct Board {
   int height;
   int width;
   int *board;
+  int *board_history;
+  int ships_left;
 } Board;
 
 // Creating the shapes
@@ -195,6 +197,8 @@ int begin_game(Board *board1, Board *board2, int conn_fd1, int conn_fd2, char *b
       board2->height = args[1];
       board1->board = calloc(args[0]*args[1], sizeof(int));
       board2->board = calloc(args[0]*args[1], sizeof(int));
+      board1->board_history = calloc(args[0]*args[1], sizeof(int));
+      board2->board_history = calloc(args[0]*args[1], sizeof(int));
       send(conn_fd1, "A", 1, 0);
     }
     else if(packet_type == 'F') return 1;
@@ -308,18 +312,19 @@ int initialize_board(Board *board, int *piece_info, int conn_fd) {
       l = 0;
       while(l < shape[i].c) {
         if(shape[i].shape[k*shape[i].c+l] == 1) {
-          if(board->board[(piece_info[i*4+3]-shape[i].y_offset+k)*(board->width)+piece_info[i*4+2]+l] == 1) {
+          if(board->board[(piece_info[i*4+3]-shape[i].y_offset+k)*(board->width)+piece_info[i*4+2]+l] > 0) {
             send(conn_fd, "E 303", 5, 0);
             for(int j = 0; j < 5; j++) free(shape[j].shape);
             return 0;
           }
-          board->board[(piece_info[i*4+3]-shape[i].y_offset+k)*(board->width)+piece_info[i*4+2]+l] = 1;
+          board->board[(piece_info[i*4+3]-shape[i].y_offset+k)*(board->width)+piece_info[i*4+2]+l] = i+1;
         }
         l++;
       }
       k++;
     }
   }
+  board->ships_left = 5;
   for(int j = 0; j < 5; j++) free(shape[j].shape);
   return 1;
 }
@@ -346,13 +351,18 @@ int initialize_game(Board *board, int conn_fd, char *buffer) {
   return 0;
 }
 
-int check_win(Board *board) {
+// Check how many ships are left
+int check_ships_left(Board *board) {
+  int ships[4] = {0};
   for(int i = 0; i < board->height; i++) {
     for(int j = 0; j < board->width; j++) {
-      if(board->board[i*board->width+j] == 1) return 0;
+      if(board->board[i*board->width+j] > 0) ships[board->board[i*board->width+j]]++;
     }
   }
-  return 1;
+  // Checking what ships were found
+  int count = 0;
+  for(int i = 0; i < 4; i++) if(ships[i] > 0) count++;
+  return count;
 }
 
 // Handle shoot/query packets
@@ -367,17 +377,37 @@ int play_game(Board *board, char *player_hist, int conn_fd, char *buffer) {
     case 'S':
       if(arg_count > 3) send(conn_fd, "E 202", 5, 0);
       else {
-        // Check that shoot in cell
-        if(args[0] < 0 || args[0] > board->height) send(conn_fd, "E 400", 5, 0);
-        else if(args[1] < 0 || args[1] > board->width) send(conn_fd, "E 400", 5, 0);
+        // Check that the shot is within a in cell
+        if(args[0] < 0 || args[0] > board->height || args[1] < 0 || args[1] > board->width) send(conn_fd, "E 400", 5, 0);
         else {
           // Check if spot has already been shot at
-          if(board->board[args[0]*board->width+args[1]] == 2 || board->board[args[0]*board->width+args[1]] == 3) send(conn_fd, "E 401", 5, 0);
+          if(board->board_history[args[0]*board->width+args[1]] > 0) send(conn_fd, "E 401", 5, 0);
           else {
-            board->board[args[0]*board->width+args[1]] += 2;
-            // Update player history
-            if(
-            if(check_win(board)) return 2;
+            char move[7];
+            // 2 if hit
+            if(board->board[args[0]*board->width+args[1]] > 0) {
+              board->board[args[0]*board->width+args[1]] = 0;
+              board->board_history[args[0]*board->width+args[1]] = 2;
+              // Update player history
+              sprintf(move, " H %d %d", args[0], args[1]);
+              strcat(player_hist, move);
+              // Board check and update
+              board->ships_left = check_ships_left(board);
+              sprintf(move, "R %d H", board->ships_left);
+              send(conn_fd, move, strlen(move), 0);
+              if(board->ships_left == 0) {
+                return 2;
+              }
+            }
+            // 1 if miss
+            else {
+              board->board_history[args[0]*board->width+args[1]] = 1;
+              // Update player history
+              sprintf(move, " M %d %d", args[0], args[1]);
+              strcat(player_hist, move);
+              sprintf(move, "R %d M", board->ships_left);
+              send(conn_fd, move, strlen(move), 0);
+            }
           }
         }
       }
@@ -394,6 +424,20 @@ int play_game(Board *board, char *player_hist, int conn_fd, char *buffer) {
   return 0;
 }
 
+void handle_win(int conn_fd1, int conn_fd2, char *buffer, int winner) {
+  if(winner == 1) {
+    read_fd(conn_fd2, buffer);
+    send(conn_fd2, "H 0", 3, 0);
+    read_fd(conn_fd1, buffer);
+    send(conn_fd1, "H 1", 3, 0);
+  }
+  else {
+    read_fd(conn_fd1, buffer);
+    send(conn_fd1, "H 0", 3, 0);
+    read_fd(conn_fd2, buffer);
+    send(conn_fd2, "H 1", 3, 0);
+  }
+}
 int main() {
   int listen_fd1, listen_fd2;
   int conn_fd1, conn_fd2;
@@ -425,11 +469,15 @@ int main() {
   while(1) {
     win = play_game(&board1, player1_history, conn_fd1, buffer); 
     if(win == 1) handle_forfeit(conn_fd1, conn_fd2, 1, buffer);
-    else if(win == 2) break;
+    else if(win == 2) {
+      handle_win(conn_fd1, conn_fd2, buffer, 1);
+    }
 
     win = play_game(&board2, player2_history, conn_fd2, buffer);
     if(win == 1) handle_forfeit(conn_fd1, conn_fd2, 2, buffer);
-    else if(win == 2) break;
+    else if(win == 2) {
+      handle_win(conn_fd1, conn_fd2, buffer, 2);
+    }
   }
   for(int i = 0; i < board1.height; i++) {
     for(int j = 0; j < board1.width; j++) {
