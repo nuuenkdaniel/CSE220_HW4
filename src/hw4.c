@@ -216,99 +216,111 @@ int begin_game(Board *board1, Board *board2, int conn_fd1, int conn_fd2, char *b
 
 // Initializes the board with the given piece information
 int initialize_board(Board *board, int *piece_info, int conn_fd) {
-  int y_offset = 0;
-  int r;
-  int c;
-  int *shape;
+  typedef struct {
+    int *shape;
+    int r;
+    int c;
+    int y_offset;
+  } Shape;
+
+  Shape shape[5];
+  // Check for out of range
   for(int i = 0; i < 5; i++) {
-    // Check if piece is valid
     if(piece_info[i*4+0] > 7 || piece_info[i*4+0] < 0) {
       send(conn_fd, "E 300", 5, 0);
       return 0;
     }
+  }
+
+  // Check for rotation out of range
+  for(int i = 0; i < 5; i++) {
     if(piece_info[i*4+1] > 4 || piece_info[i*4+1] < 1) {
       send(conn_fd, "E 301", 5, 0);
       return 0;
     }
-    if(piece_info[i*4+2] > board->width || piece_info[i*4+2] < 0 || piece_info[i*4+3] > board->height || piece_info[i*4+3] < 0) {
-      send(conn_fd, "E 302", 5, 0);
-      return 0;
-    }
+  }
 
+  // Check for doesn't fit
+  for(int i = 0; i < 5; i++) {
     // Match the shape
     switch (piece_info[i*4+0]) {
       case 1:
-        shape = (int*)shape1;
-        r = 2;
-        c = 2;
+        shape[i].shape = (int*)shape1;
+        shape[i].r = 2;
+        shape[i].c = 2;
         break;
       case 2:
-        shape = (int*)shape2;
-        r = 4;
-        c = 1;
+        shape[i].shape = (int*)shape2;
+        shape[i].r = 4;
+        shape[i].c = 1;
         break;
       case 3:
-        shape = (int*)shape3;
-        r = 2;
-        c = 3;
+        shape[i].shape = (int*)shape3;
+        shape[i].r = 2;
+        shape[i].c = 3;
         break;
       case 4:
-        shape = (int*)shape4;
-        r = 3;
-        c = 2;
+        shape[i].shape = (int*)shape4;
+        shape[i].r = 3;
+        shape[i].c = 2;
         break;
       case 5:
-        shape = (int*)shape5;
-        r = 2;
-        c = 3;
+        shape[i].shape = (int*)shape5;
+        shape[i].r = 2;
+        shape[i].c = 3;
         break;
       case 6:
-        shape = (int*)shape6;
-        r = 3;
-        c = 2;
+        shape[i].shape = (int*)shape6;
+        shape[i].r = 3;
+        shape[i].c = 2;
         break;
       case 7:
-        shape = (int*)shape7;
-        r = 2;
-        c = 3;
+        shape[i].shape = (int*)shape7;
+        shape[i].r = 2;
+        shape[i].c = 3;
         break;
     }
 
     // Rotate Shape
-    shape = rotate_shape(shape, r, c, piece_info[i*4+1]);
+    shape[i].shape = rotate_shape(shape[i].shape, shape[i].r, shape[i].c, piece_info[i*4+1]-1);
+    
     if(piece_info[i*4+1]%2 == 0) {
-      int temp = r;
-      r = c;
-      c = temp;
+      int temp = shape[i].r;
+      shape[i].r = shape[i].c;
+      shape[i].c = temp;
     }
-
     // Figure out the y offset
-    y_offset = 0;
-    while(piece_info[y_offset*4+0] != 0 && y_offset < r) y_offset++;
+    shape[i].y_offset = 0;
+    while(shape[i].shape[shape[i].y_offset*4+0] != 1 && shape[i].y_offset < shape[i].r) shape[i].y_offset++;
 
     // Check if piece in range of the board
-    if((piece_info[i*4+2]+c-1) > board->width || piece_info[i*4+3]-y_offset < 0 || (piece_info[i*4+3]-y_offset+r-1) > board->height) {
+    if((piece_info[i*4+2]+shape[i].c-1) > board->width || piece_info[i*4+2] < 0 || piece_info[i*4+3]-shape[i].y_offset < 0 || (piece_info[i*4+3]-shape[i].y_offset+shape[i].r-1) > board->height) {
       send(conn_fd, "E 302", 5, 0);
-      free(shape);
+      for(int j = 0; j < 5; j++) free(shape[j].shape);
       return 0;
     }
-    // Placing the piece while checking for collisions
+  }
+  // Placing the piece while checking for collisions
+  for(int i = 0; i < 5; i++) {
     int k = 0;
     int l = 0;
-    while(k < r) {
-      while(l < c) {
-        if(shape[k*c+l] == 1) {
-          if(board->board[piece_info[i*4+3-y_offset+k]*(board->width)+piece_info[i*4+3]+l] == 1) {
+    while(k < shape[i].r) {
+      l = 0;
+      while(l < shape[i].c) {
+        if(shape[i].shape[k*shape[i].c+l] == 1) {
+          if(board->board[(piece_info[i*4+3]-shape[i].y_offset+k)*(board->width)+piece_info[i*4+2]+l] == 1) {
             send(conn_fd, "E 303", 5, 0);
-            free(shape);
+            for(int j = 0; j < 5; j++) free(shape[j].shape);
             return 0;
           }
-          board->board[(piece_info[i*4+3]-y_offset+k)*(board->width)+piece_info[i*4+3]+l] = 1;
+          board->board[(piece_info[i*4+3]-shape[i].y_offset+k)*(board->width)+piece_info[i*4+2]+l] = 1;
         }
+        l++;
       }
+      k++;
     }
-    free(shape);
   }
+  for(int j = 0; j < 5; j++) free(shape[j].shape);
   return 1;
 }
 
@@ -325,6 +337,7 @@ int initialize_game(Board *board, int conn_fd, char *buffer) {
         done = 1;
         send(conn_fd, "A", 1, 0);
       }
+      else memset(board->board, 0, board->width*board->height*sizeof(int));
     }
     else if(packet_type == 'F') return 1;
     else if(packet_type != 'I') send(conn_fd, "101", 3, 0);
@@ -360,7 +373,12 @@ int main() {
   if((forfeit = begin_game(&board1, &board2, conn_fd1, conn_fd2, buffer)) != 0) handle_forfeit(conn_fd1, conn_fd2, forfeit, buffer);
   if((forfeit = initialize_game(&board1, conn_fd1, buffer)) != 0) handle_forfeit(conn_fd1, conn_fd2, 1, buffer);
   if((forfeit = initialize_game(&board2, conn_fd2, buffer)) != 0) handle_forfeit(conn_fd1, conn_fd2, 2, buffer);
-
+  for(int i = 0; i < board1.height; i++) {
+    for(int j = 0; j < board1.width; j++) {
+      printf("%d ", board1.board[i*board1.width+j]);
+    }
+    printf("\n");
+  }
   // Server Shutdown
   printf("[Server] Shutting down.\n");
   free(board1.board);
