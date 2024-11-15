@@ -11,6 +11,24 @@
 #define PORT1 2201
 #define PORT2 2202
 
+// BattleShip Board
+typedef struct Board {
+  int height;
+  int width;
+  int *board;
+} Board;
+
+// Creating the shapes
+int shape1[2][2] = { 1,1,1,1 };
+int shape2[4][1] = { 1,1,1,1 };
+int shape3[2][3] = { 0,1,1,1,1,0 };
+int shape4[3][2] = { 1,0,1,0,1,1 };
+int shape5[2][3] = { 1,1,0,0,1,1 };
+int shape6[3][2] = { 0,1,0,1,1,1 };
+int shape7[2][3] = { 1,1,1,0,1,0 };
+
+
+
 // Sets up the socket for connection
 void socket_setup(int *listen_fd, struct sockaddr_in *address, int *opt, int *addrlen, short port) {
   // Creating socket
@@ -53,6 +71,7 @@ void await_conn(int *listen_fd, int *conn_fd, struct sockaddr_in *address, int *
   }
 }
 
+// Copies shape from src to dest
 void copy_shape(int *src_shape, int *dest_shape, int r, int c_src, int c_dest) {
   for(int i = 0; i < r; i++) {
     for(int j = 0; j < c_src; j++) {
@@ -137,6 +156,7 @@ int *rotate_shape(int *shape, int r, int c, int rotations){
   return new_shape;
 }
 
+// Reads the given file descriptor and puts into buffer
 void read_fd(int conn_fd, char *buffer) {
   memset(buffer, 0, BUFFER_SIZE);
   int nbytes = read(conn_fd, buffer, BUFFER_SIZE);
@@ -146,6 +166,7 @@ void read_fd(int conn_fd, char *buffer) {
   }
 }
 
+// Handles forfeiting
 void handle_forfeit(int conn_fd1, int conn_fd2, int forfeiter, char *buffer) {
   if(forfeiter == 1) {
     read_fd(conn_fd2, buffer);
@@ -158,7 +179,8 @@ void handle_forfeit(int conn_fd1, int conn_fd2, int forfeiter, char *buffer) {
   }
 }
 
-int begin_game(int *board1, int *board2, int conn_fd1, int conn_fd2, char *buffer) {
+// Handles the 'B' packets
+int begin_game(Board *board1, Board *board2, int conn_fd1, int conn_fd2, char *buffer) {
   int done = 0;
   char extra[1024];
   char packet_type;
@@ -167,8 +189,12 @@ int begin_game(int *board1, int *board2, int conn_fd1, int conn_fd2, char *buffe
     int args[3];
     if(sscanf(buffer, "%c %d %d %s", &packet_type, &args[0], &args[1], extra) == 3 && packet_type == 'B' && args[0] > 0 && args[1] > 0) {
       done = 1; 
-      board1 = calloc(args[0]*args[1], sizeof(int));
-      board2 = calloc(args[0]*args[1], sizeof(int));
+      board1->width = args[0];
+      board2->width = args[0];
+      board1->height = args[1];
+      board2->height = args[1];
+      board1->board = calloc(args[0]*args[1], sizeof(int));
+      board2->board = calloc(args[0]*args[1], sizeof(int));
       send(conn_fd1, "A", 1, 0);
     }
     else if(packet_type == 'F') return 1;
@@ -188,10 +214,106 @@ int begin_game(int *board1, int *board2, int conn_fd1, int conn_fd2, char *buffe
   return 0;
 }
 
-void initialize_board(int *board, int *pieces) {
+// Initializes the board with the given piece information
+int initialize_board(Board *board, int *piece_info, int conn_fd) {
+  int y_offset = 0;
+  int r;
+  int c;
+  int *shape;
+  for(int i = 0; i < 5; i++) {
+    // Check if piece is valid
+    if(piece_info[i*4+0] > 7 || piece_info[i*4+0] < 0) {
+      send(conn_fd, "E 300", 5, 0);
+      return 0;
+    }
+    if(piece_info[i*4+1] > 4 || piece_info[i*4+1] < 1) {
+      send(conn_fd, "E 301", 5, 0);
+      return 0;
+    }
+    if(piece_info[i*4+2] > board->width || piece_info[i*4+2] < 0 || piece_info[i*4+3] > board->height || piece_info[i*4+3] < 0) {
+      send(conn_fd, "E 302", 5, 0);
+      return 0;
+    }
 
+    // Match the shape
+    switch (piece_info[i*4+0]) {
+      case 1:
+        shape = (int*)shape1;
+        r = 2;
+        c = 2;
+        break;
+      case 2:
+        shape = (int*)shape2;
+        r = 4;
+        c = 1;
+        break;
+      case 3:
+        shape = (int*)shape3;
+        r = 2;
+        c = 3;
+        break;
+      case 4:
+        shape = (int*)shape4;
+        r = 3;
+        c = 2;
+        break;
+      case 5:
+        shape = (int*)shape5;
+        r = 2;
+        c = 3;
+        break;
+      case 6:
+        shape = (int*)shape6;
+        r = 3;
+        c = 2;
+        break;
+      case 7:
+        shape = (int*)shape7;
+        r = 2;
+        c = 3;
+        break;
+    }
+
+    // Rotate Shape
+    shape = rotate_shape(shape, r, c, piece_info[i*4+1]);
+    if(piece_info[i*4+1]%2 == 0) {
+      int temp = r;
+      r = c;
+      c = temp;
+    }
+
+    // Figure out the y offset
+    y_offset = 0;
+    while(piece_info[y_offset*4+0] != 0 && y_offset < r) y_offset++;
+
+    // Check if piece in range of the board
+    if((piece_info[i*4+2]+c-1) > board->width || piece_info[i*4+3]-y_offset < 0 || (piece_info[i*4+3]-y_offset+r-1) > board->height) {
+      send(conn_fd, "E 302", 5, 0);
+      free(shape);
+      return 0;
+    }
+    // Placing the piece while checking for collisions
+    int k = 0;
+    int l = 0;
+    while(k < r) {
+      while(l < c) {
+        if(shape[k*c+l] == 1) {
+          if(board->board[piece_info[i*4+3-y_offset+k]*(board->width)+piece_info[i*4+3]+l] == 1) {
+            send(conn_fd, "E 303", 5, 0);
+            free(shape);
+            return 0;
+          }
+          board->board[(piece_info[i*4+3]-y_offset+k)*(board->width)+piece_info[i*4+3]+l] = 1;
+        }
+      }
+    }
+    free(shape);
+  }
+  return 1;
 }
-int initialize_game(int *board1, int conn_fd, char *buffer) {
+
+// Handles the 'I' packets
+int initialize_game(Board *board, int conn_fd, char *buffer) {
   int done = 0;
   char packet_type;
   char extra[1024];
@@ -199,8 +321,10 @@ int initialize_game(int *board1, int conn_fd, char *buffer) {
   while(!done) {
     read_fd(conn_fd, buffer);
     if(sscanf(buffer, "%c %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %s", &packet_type, &args[0][0], &args[0][1], &args[0][2], &args[0][3],  &args[1][0], &args[1][1], &args[1][2], &args[1][3], &args[2][0], &args[2][1], &args[2][2], &args[2][3], &args[3][0], &args[3][1], &args[3][2], &args[3][3], &args[4][0], &args[4][1], &args[4][2], &args[4][3], extra) == 21 && packet_type == 'I') {
-      done = 1;
-      send(conn_fd, "A", 1, 0);
+      if(initialize_board(board, (int*)args, conn_fd) != 0) {
+        done = 1;
+        send(conn_fd, "A", 1, 0);
+      }
     }
     else if(packet_type == 'F') return 1;
     else if(packet_type != 'I') send(conn_fd, "101", 3, 0);
@@ -226,28 +350,21 @@ int main() {
   await_conn(&listen_fd1, &conn_fd1, &address1, &addrlen);
   await_conn(&listen_fd2, &conn_fd2, &address2, &addrlen);
 
-  // Creating the shapes
-  int shape1[2][2] = { 1,1,1,1 };
-  int shape2[4][1] = { 1,1,1,1 };
-  int shape3[2][3] = { 0,1,1,1,1,0 };
-  int shape4[3][2] = { 1,0,1,0,1,1 };
-  int shape5[2][3] = { 1,1,0,0,1,1 };
-  int shape6[3][2] = { 0,1,0,1,1,1 };
-  int shape7[2][3] = { 1,1,1,0,1,0 };
-
   int forfeit;
-  int *board1, *board2 = NULL;
+  struct Board board1, board2;
   char player1_history[1024], board2_history[1024];
   player1_history[0] = '\0';
   board2_history[0] = '\0';
 
-  if((forfeit = begin_game(board1, board2, conn_fd1, conn_fd2, buffer)) != 0) handle_forfeit(conn_fd1, conn_fd2, forfeit, buffer);
-  if((forfeit = initialize_game(board1, conn_fd1, buffer)) != 0) handle_forfeit(conn_fd1, conn_fd2, 1, buffer);
-  if((forfeit = initialize_game(board2, conn_fd2, buffer)) != 0) handle_forfeit(conn_fd1, conn_fd2, 2, buffer);
+  // Playing the game
+  if((forfeit = begin_game(&board1, &board2, conn_fd1, conn_fd2, buffer)) != 0) handle_forfeit(conn_fd1, conn_fd2, forfeit, buffer);
+  if((forfeit = initialize_game(&board1, conn_fd1, buffer)) != 0) handle_forfeit(conn_fd1, conn_fd2, 1, buffer);
+  if((forfeit = initialize_game(&board2, conn_fd2, buffer)) != 0) handle_forfeit(conn_fd1, conn_fd2, 2, buffer);
 
+  // Server Shutdown
   printf("[Server] Shutting down.\n");
-  free(board1);
-  free(board2);
+  free(board1.board);
+  free(board2.board);
   close(conn_fd1);
   close(listen_fd1);
   close(conn_fd2);
