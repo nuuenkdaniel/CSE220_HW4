@@ -146,7 +146,19 @@ void read_fd(int conn_fd, char *buffer) {
   }
 }
 
-void begin_game(int *board1, int *board2, int conn_fd1, int conn_fd2, char *buffer) {
+void handle_forfeit(int conn_fd1, int conn_fd2, int forfeiter, char *buffer) {
+  if(forfeiter == 1) {
+    read_fd(conn_fd2, buffer);
+    send(conn_fd1, "H 0", 3, 0);
+    send(conn_fd2, "H 1", 3, 0);
+  }
+  else {
+    send(conn_fd1, "H 1", 3, 0);
+    send(conn_fd2, "H 0", 3, 0);
+  }
+}
+
+int begin_game(int *board1, int *board2, int conn_fd1, int conn_fd2, char *buffer) {
   int done = 0;
   char extra[1024];
   char packet_type;
@@ -159,8 +171,9 @@ void begin_game(int *board1, int *board2, int conn_fd1, int conn_fd2, char *buff
       board2 = calloc(args[0]*args[1], sizeof(int));
       send(conn_fd1, "A", 1, 0);
     }
-    else if(packet_type != 'B') send(conn_fd1, "100", 3, 0);
-    else send(conn_fd1, "200", 3, 0);
+    else if(packet_type == 'F') return 1;
+    else if(packet_type != 'B') send(conn_fd1, "E 100", 5, 0);
+    else send(conn_fd1, "E 200", 5, 0);
   }
   done = 0;
   while(!done) {
@@ -169,26 +182,31 @@ void begin_game(int *board1, int *board2, int conn_fd1, int conn_fd2, char *buff
       done = 1;
       send(conn_fd2, "A", 1, 0);
     }
-    else if(packet_type != 'B') send(conn_fd2, "100", 3, 0);
-    else send(conn_fd2, "200", 3, 0);
+    else if(packet_type != 'B') send(conn_fd2, "E 100", 5, 0);
+    else send(conn_fd2, "E 200", 5, 0);
   }
+  return 0;
 }
 
-void initialize_game(int *board1, int conn_fd, char *buffer) {
+void initialize_board(int *board, int *pieces) {
+
+}
+int initialize_game(int *board1, int conn_fd, char *buffer) {
   int done = 0;
   char packet_type;
   char extra[1024];
+  int args[5][4];
   while(!done) {
     read_fd(conn_fd, buffer);
-    int args[5][4];
-    char *buffer_ptr = buffer;
-    if(sscanf(buffer_ptr, "%c", &packet_type) != 1 || packet_type != 'I') send(conn_fd, "101", 3, 0);
-    buffer_ptr = strchr(buffer_ptr, ' ');
-    int i = 0;
-    while(i < 5) {
-      if(sscanf(buffer_ptr, "%d %d %d %d", &args[i][0], &args[i][1], &args[i][2], &args[i][3]) != 4) send(conn_fd, "201", 3, 0);
+    if(sscanf(buffer, "%c %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %s", &packet_type, &args[0][0], &args[0][1], &args[0][2], &args[0][3],  &args[1][0], &args[1][1], &args[1][2], &args[1][3], &args[2][0], &args[2][1], &args[2][2], &args[2][3], &args[3][0], &args[3][1], &args[3][2], &args[3][3], &args[4][0], &args[4][1], &args[4][2], &args[4][3], extra) == 21 && packet_type == 'I') {
+      done = 1;
+      send(conn_fd, "A", 1, 0);
     }
+    else if(packet_type == 'F') return 1;
+    else if(packet_type != 'I') send(conn_fd, "101", 3, 0);
+    else send(conn_fd, "E 201", 5, 0);
   }
+  return 0;
 }
 
 int main() {
@@ -217,13 +235,15 @@ int main() {
   int shape6[3][2] = { 0,1,0,1,1,1 };
   int shape7[2][3] = { 1,1,1,0,1,0 };
 
+  int forfeit;
   int *board1, *board2 = NULL;
   char player1_history[1024], board2_history[1024];
   player1_history[0] = '\0';
   board2_history[0] = '\0';
 
-  begin_game(board1, board2, conn_fd1, conn_fd2, buffer);
-  // initialize_game(board1, conn_fd1, buffer);
+  if((forfeit = begin_game(board1, board2, conn_fd1, conn_fd2, buffer)) != 0) handle_forfeit(conn_fd1, conn_fd2, forfeit, buffer);
+  if((forfeit = initialize_game(board1, conn_fd1, buffer)) != 0) handle_forfeit(conn_fd1, conn_fd2, 1, buffer);
+  if((forfeit = initialize_game(board2, conn_fd2, buffer)) != 0) handle_forfeit(conn_fd1, conn_fd2, 2, buffer);
 
   printf("[Server] Shutting down.\n");
   free(board1);
