@@ -283,7 +283,7 @@ int initialize_board(Board *board, int *piece_info, int conn_fd) {
 
     // Rotate Shape
     shape[i].shape = rotate_shape(shape[i].shape, shape[i].r, shape[i].c, piece_info[i*4+1]-1);
-    
+
     if(piece_info[i*4+1]%2 == 0) {
       int temp = shape[i].r;
       shape[i].r = shape[i].c;
@@ -346,6 +346,54 @@ int initialize_game(Board *board, int conn_fd, char *buffer) {
   return 0;
 }
 
+int check_win(Board *board) {
+  for(int i = 0; i < board->height; i++) {
+    for(int j = 0; j < board->width; j++) {
+      if(board->board[i*board->width+j] == 1) return 0;
+    }
+  }
+  return 1;
+}
+
+// Handle shoot/query packets
+int play_game(Board *board, char *player_hist, int conn_fd, char *buffer) {
+  char packet_type;
+  int done = 0;
+  char extra[1024];
+  int args[2];
+  int arg_count = sscanf(buffer, "%c %d %d %s", &packet_type, &args[0], &args[1], extra);
+
+  switch(packet_type) {
+    case 'S':
+      if(arg_count > 3) send(conn_fd, "E 202", 5, 0);
+      else {
+        // Check that shoot in cell
+        if(args[0] < 0 || args[0] > board->height) send(conn_fd, "E 400", 5, 0);
+        else if(args[1] < 0 || args[1] > board->width) send(conn_fd, "E 400", 5, 0);
+        else {
+          // Check if spot has already been shot at
+          if(board->board[args[0]*board->width+args[1]] == 2 || board->board[args[0]*board->width+args[1]] == 3) send(conn_fd, "E 401", 5, 0);
+          else {
+            board->board[args[0]*board->width+args[1]] += 2;
+            // Update player history
+            if(
+            if(check_win(board)) return 2;
+          }
+        }
+      }
+      break;
+    case 'Q':
+      if(arg_count > 1) send(conn_fd, "E 202", 5, 0);
+      else send(conn_fd, player_hist, strlen(player_hist), 0);
+      break;
+    case 'F':
+      return 1;
+    default:
+      send(conn_fd, "E 102", 5, 0);
+  }
+  return 0;
+}
+
 int main() {
   int listen_fd1, listen_fd2;
   int conn_fd1, conn_fd2;
@@ -365,14 +413,24 @@ int main() {
 
   int forfeit;
   struct Board board1, board2;
-  char player1_history[1024], board2_history[1024];
+  char player1_history[1024], player2_history[1024];
   player1_history[0] = '\0';
-  board2_history[0] = '\0';
+  player2_history[0] = '\0';
 
   // Playing the game
   if((forfeit = begin_game(&board1, &board2, conn_fd1, conn_fd2, buffer)) != 0) handle_forfeit(conn_fd1, conn_fd2, forfeit, buffer);
-  if((forfeit = initialize_game(&board1, conn_fd1, buffer)) != 0) handle_forfeit(conn_fd1, conn_fd2, 1, buffer);
-  if((forfeit = initialize_game(&board2, conn_fd2, buffer)) != 0) handle_forfeit(conn_fd1, conn_fd2, 2, buffer);
+  if(initialize_game(&board1, conn_fd1, buffer) != 0) handle_forfeit(conn_fd1, conn_fd2, 1, buffer);
+  if(initialize_game(&board2, conn_fd2, buffer) != 0) handle_forfeit(conn_fd1, conn_fd2, 2, buffer);
+  int win;
+  while(1) {
+    win = play_game(&board1, player1_history, conn_fd1, buffer); 
+    if(win == 1) handle_forfeit(conn_fd1, conn_fd2, 1, buffer);
+    else if(win == 2) break;
+
+    win = play_game(&board2, player2_history, conn_fd2, buffer);
+    if(win == 1) handle_forfeit(conn_fd1, conn_fd2, 2, buffer);
+    else if(win == 2) break;
+  }
   for(int i = 0; i < board1.height; i++) {
     for(int j = 0; j < board1.width; j++) {
       printf("%d ", board1.board[i*board1.width+j]);
