@@ -29,8 +29,6 @@ int shape5[2][3] = { 1,1,0,0,1,1 };
 int shape6[3][2] = { 0,1,0,1,1,1 };
 int shape7[2][3] = { 1,1,1,0,1,0 };
 
-
-
 // Sets up the socket for connection
 void socket_setup(int *listen_fd, struct sockaddr_in *address, int *opt, int *addrlen, short port) {
   // Creating socket
@@ -171,13 +169,14 @@ void read_fd(int conn_fd, char *buffer) {
 // Handles forfeiting
 void handle_forfeit(int conn_fd1, int conn_fd2, int forfeiter, char *buffer) {
   if(forfeiter == 1) {
-    read_fd(conn_fd2, buffer);
     send(conn_fd1, "H 0", 3, 0);
+    read_fd(conn_fd2, buffer);
     send(conn_fd2, "H 1", 3, 0);
   }
   else {
-    send(conn_fd1, "H 1", 3, 0);
     send(conn_fd2, "H 0", 3, 0);
+    read_fd(conn_fd1, buffer);
+    send(conn_fd1, "H 1", 3, 0);
   }
 }
 
@@ -189,7 +188,7 @@ int begin_game(Board *board1, Board *board2, int conn_fd1, int conn_fd2, char *b
   while(!done) {
     read_fd(conn_fd1, buffer);
     int args[3];
-    if(sscanf(buffer, "%c %d %d %s", &packet_type, &args[0], &args[1], extra) == 3 && packet_type == 'B' && args[0] > 0 && args[1] > 0) {
+    if(sscanf(buffer, "%c %d %d %s", &packet_type, &args[0], &args[1], extra) == 3 && packet_type == 'B' && args[0] >= 10 && args[1] >= 10) {
       done = 1; 
       board1->width = args[0];
       board2->width = args[0];
@@ -212,6 +211,7 @@ int begin_game(Board *board1, Board *board2, int conn_fd1, int conn_fd2, char *b
       done = 1;
       send(conn_fd2, "A", 1, 0);
     }
+    else if(packet_type == 'F') return 2;
     else if(packet_type != 'B') send(conn_fd2, "E 100", 5, 0);
     else send(conn_fd2, "E 200", 5, 0);
   }
@@ -230,8 +230,8 @@ int initialize_board(Board *board, int *piece_info, int conn_fd) {
   Shape shape[5];
   // Check for out of range
   for(int i = 0; i < 5; i++) {
-    if(piece_info[i*4+0] > 7 || piece_info[i*4+0] < 0) {
-      send(conn_fd, "E 300", 5, 0);
+    if(piece_info[i*4+0] > 7 || piece_info[i*4+0] < 1) {
+      send(conn_fd, "E 300", strlen("E 300"), 0);
       return 0;
     }
   }
@@ -239,7 +239,7 @@ int initialize_board(Board *board, int *piece_info, int conn_fd) {
   // Check for rotation out of range
   for(int i = 0; i < 5; i++) {
     if(piece_info[i*4+1] > 4 || piece_info[i*4+1] < 1) {
-      send(conn_fd, "E 301", 5, 0);
+      send(conn_fd, "E 301", strlen("E 301"), 0);
       return 0;
     }
   }
@@ -299,7 +299,7 @@ int initialize_board(Board *board, int *piece_info, int conn_fd) {
 
     // Check if piece in range of the board
     if((piece_info[i*4+2]+shape[i].c-1) > board->width || piece_info[i*4+2] < 0 || piece_info[i*4+3]-shape[i].y_offset < 0 || (piece_info[i*4+3]-shape[i].y_offset+shape[i].r-1) > board->height) {
-      send(conn_fd, "E 302", 5, 0);
+      send(conn_fd, "E 302", strlen("E 302"), 0);
       for(int j = 0; j < 5; j++) free(shape[j].shape);
       return 0;
     }
@@ -313,7 +313,7 @@ int initialize_board(Board *board, int *piece_info, int conn_fd) {
       while(l < shape[i].c) {
         if(shape[i].shape[k*shape[i].c+l] == 1) {
           if(board->board[(piece_info[i*4+3]-shape[i].y_offset+k)*(board->width)+piece_info[i*4+2]+l] > 0) {
-            send(conn_fd, "E 303", 5, 0);
+            send(conn_fd, "E 303", strlen("E 303"), 0);
             for(int j = 0; j < 5; j++) free(shape[j].shape);
             return 0;
           }
@@ -340,33 +340,34 @@ int initialize_game(Board *board, int conn_fd, char *buffer) {
     if(sscanf(buffer, "%c %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %s", &packet_type, &args[0][0], &args[0][1], &args[0][2], &args[0][3],  &args[1][0], &args[1][1], &args[1][2], &args[1][3], &args[2][0], &args[2][1], &args[2][2], &args[2][3], &args[3][0], &args[3][1], &args[3][2], &args[3][3], &args[4][0], &args[4][1], &args[4][2], &args[4][3], extra) == 21 && packet_type == 'I') {
       if(initialize_board(board, (int*)args, conn_fd) != 0) {
         done = 1;
-        send(conn_fd, "A", 1, 0);
+        send(conn_fd, "A", strlen("A"), 0);
       }
       else memset(board->board, 0, board->width*board->height*sizeof(int));
     }
     else if(packet_type == 'F') return 1;
-    else if(packet_type != 'I') send(conn_fd, "101", 3, 0);
-    else send(conn_fd, "E 201", 5, 0);
+    else if(packet_type != 'I') send(conn_fd, "E 101", 5, 0);
+    else send(conn_fd, "E 201", strlen("E 201"), 0);
   }
   return 0;
 }
 
 // Check how many ships are left
 int check_ships_left(Board *board) {
-  int ships[4] = {0};
+  int ships[5] = {0};
   for(int i = 0; i < board->height; i++) {
     for(int j = 0; j < board->width; j++) {
-      if(board->board[i*board->width+j] > 0) ships[board->board[i*board->width+j]]++;
+      if(board->board[i*board->width+j] > 0) ships[board->board[i*board->width+j]-1]++;
     }
   }
   // Checking what ships were found
   int count = 0;
-  for(int i = 0; i < 4; i++) if(ships[i] > 0) count++;
+  for(int i = 0; i < 5; i++) if(ships[i] > 0) count++;
   return count;
 }
 
 // Handle shoot/query packets
 int play_game(Board *board, char *player_hist, int conn_fd, char *buffer) {
+  read_fd(conn_fd, buffer);
   char packet_type;
   int done = 0;
   char extra[1024];
@@ -375,7 +376,7 @@ int play_game(Board *board, char *player_hist, int conn_fd, char *buffer) {
 
   switch(packet_type) {
     case 'S':
-      if(arg_count > 3) send(conn_fd, "E 202", 5, 0);
+      if(arg_count != 3) send(conn_fd, "E 202", 5, 0);
       else {
         // Check that the shot is within a in cell
         if(args[0] < 0 || args[0] > board->height || args[1] < 0 || args[1] > board->width) send(conn_fd, "E 400", 5, 0);
@@ -398,6 +399,7 @@ int play_game(Board *board, char *player_hist, int conn_fd, char *buffer) {
               if(board->ships_left == 0) {
                 return 2;
               }
+              return 3;
             }
             // 1 if miss
             else {
@@ -407,6 +409,7 @@ int play_game(Board *board, char *player_hist, int conn_fd, char *buffer) {
               strcat(player_hist, move);
               sprintf(move, "R %d M", board->ships_left);
               send(conn_fd, move, strlen(move), 0);
+              return 3;
             }
           }
         }
@@ -414,12 +417,19 @@ int play_game(Board *board, char *player_hist, int conn_fd, char *buffer) {
       break;
     case 'Q':
       if(arg_count > 1) send(conn_fd, "E 202", 5, 0);
-      else send(conn_fd, player_hist, strlen(player_hist), 0);
+      else {
+        char query[1024];
+        sprintf(query, "G %d", board->ships_left);
+        strcat(query, player_hist);
+        send(conn_fd, query, strlen(query), 0);
+      }
       break;
     case 'F':
       return 1;
+      break;
     default:
       send(conn_fd, "E 102", 5, 0);
+      break;
   }
   return 0;
 }
@@ -438,6 +448,7 @@ void handle_win(int conn_fd1, int conn_fd2, char *buffer, int winner) {
     send(conn_fd2, "H 1", 3, 0);
   }
 }
+
 int main() {
   int listen_fd1, listen_fd2;
   int conn_fd1, conn_fd2;
@@ -464,26 +475,46 @@ int main() {
   // Playing the game
   if((forfeit = begin_game(&board1, &board2, conn_fd1, conn_fd2, buffer)) != 0) handle_forfeit(conn_fd1, conn_fd2, forfeit, buffer);
   if(initialize_game(&board1, conn_fd1, buffer) != 0) handle_forfeit(conn_fd1, conn_fd2, 1, buffer);
+  for(int i = 0; i < board1.height; i++) {
+    for(int j = 0; j < board1.width; j++) {
+      printf("%d ", board1.board[i*board2.width+j]);
+    }
+    printf("\n");
+  }
   if(initialize_game(&board2, conn_fd2, buffer) != 0) handle_forfeit(conn_fd1, conn_fd2, 2, buffer);
   int win;
   while(1) {
-    win = play_game(&board1, player1_history, conn_fd1, buffer); 
-    if(win == 1) handle_forfeit(conn_fd1, conn_fd2, 1, buffer);
-    else if(win == 2) {
-      handle_win(conn_fd1, conn_fd2, buffer, 1);
+    win = 0;
+    while(!win) {
+      win = play_game(&board2, player1_history, conn_fd1, buffer); 
+      for(int i = 0; i < board2.height; i++) {
+        for(int j = 0; j < board2.width; j++) {
+          printf("%d ", board2.board[i*board2.width+j]);
+        }
+        printf("\n");
+      }
+      if(win == 1) {
+        handle_forfeit(conn_fd1, conn_fd2, 1, buffer);
+        break;
+      }
+      else if(win == 2) {
+        handle_win(conn_fd1, conn_fd2, buffer, 1);
+        break;
+      }
     }
 
-    win = play_game(&board2, player2_history, conn_fd2, buffer);
-    if(win == 1) handle_forfeit(conn_fd1, conn_fd2, 2, buffer);
-    else if(win == 2) {
-      handle_win(conn_fd1, conn_fd2, buffer, 2);
+    win = 0;
+    while(!win) {
+      win = play_game(&board1, player2_history, conn_fd2, buffer);
+      if(win == 1) {
+        handle_forfeit(conn_fd1, conn_fd2, 2, buffer);
+        break;
+      }
+      else if(win == 2) {
+        handle_win(conn_fd1, conn_fd2, buffer, 2);
+        break;
+      }
     }
-  }
-  for(int i = 0; i < board1.height; i++) {
-    for(int j = 0; j < board1.width; j++) {
-      printf("%d ", board1.board[i*board1.width+j]);
-    }
-    printf("\n");
   }
   // Server Shutdown
   printf("[Server] Shutting down.\n");
